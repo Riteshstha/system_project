@@ -1,0 +1,93 @@
+# Dependencies
+dist/
+node_modules/
+.pnp.*
+.pnpm-store/
+pnpm-lock.yaml
+
+# Next.js
+.next/
+out/
+build/
+
+# Local env files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IntelliJ IDE
+.idea/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Temporary files
+*.tmp
+*.temp
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# Database files
+*.sqlite
+*.db
+
+# Build outputs
+coverage/
+.nyc_output/
+
+# Runtime data
+pids/
+logs/
+*.pid
+*.seed
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# Editor directories and files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Database migrations
+prisma/migrations/
+
+# NextAuth secret
+data/
+
+# GitBook
+.gitbook/
+.gitbook.json
+
+# Environment
+.env
+
+# Build artifacts
+dist/
+**/*.d.ts
+
+# Local SSH keys
+.ssh/
+
+# Session files
+session*
+
+# Temporary
+*.tmp
+
+# Build logs
+*.log

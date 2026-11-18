@@ -1,0 +1,235 @@
+// Prisma schema. This is the single source of truth for the business.
+//
+// Design notes:
+// - Prices are stored as INTEGER (cents / paisa) to avoid float drift.
+//   e.g. 1500.00 USD = 150000 cents. Always convert on read/write.
+// - `Order.status` is the ONLY state machine in Phase 1. Nothing else
+//   (email, payment) can flip it — a worker does, explicitly.
+// - Every row that belongs to a client carries `clientId`, which is the
+//   anchor for tenant isolation. Every query must filter on it.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Package {
+  id           String   @id @default(cuid())
+  name         String
+  slug         String?    // URL-friendly identifier, e.g. "bundle-launch"
+  category     String // "WEBSITE_DESIGN" | "HOSTING" | "DNS"
+  description  String
+  priceCents   Int      // one-time for design; monthly for hosting
+  billingCycle String   // "ONE_TIME" | "MONTHLY" | "YEARLY"
+  // Limits only meaningful for hosting; ignored otherwise.
+  ramMb        Int?     @default(0)
+  cpuCores     Float?   @default(0)
+  storageMb    Int?     @default(0)
+  dnsIncluded  Boolean  @default(false)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  orders Order[]
+
+  @@index([category, active])
+  @@unique([name, category])
+}
+
+model Order {
+  id               String        @id @default(cuid())
+  clientId         String? // null until the client registers/exists
+  client           Client?       @relation(fields: [clientId], references: [id])
+  clientName       String
+  clientEmail      String
+  clientPhone      String?
+  company          String?       // company / organization name
+  packageId        String
+  package          Package       @relation(fields: [packageId], references: [id])
+  // The combination the visitor selected on the pricing page.
+  selectionJson    String // JSON: {website?, hosting?, dns?, extras?, totalCents}
+  totalCents       Int
+  quotedPriceCents Int?          // admin-editable quoted price
+  currency         String        @default("NPR")
+  status           OrderStatus   @default(PENDING)
+  source           OrderSource   @default(ORDER)
+  advancePct       Int           @default(50) // % due up front for design work
+  advanceCents     Int           @default(0)  // This is in Paisa
+  notes            String?       // customer project notes
+  internalNotes    String?       // admin-only internal notes
+  termsAccepted    Boolean       @default(false)
+  termsAcceptedAt  DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  // One order can spawn a subscription (Phase 3).
+  subscription Subscription?
+  invoices    Invoice[]
+  paymentTransactions PaymentTransaction[]
+  orderNumber String?       // e.g. "ORD-2026-0001", generated on creation
+
+  @@index([status])
+  @@index([clientEmail])
+  @@index([clientId])
+  @@index([orderNumber])
+  @@index([source])
+}
+
+enum OrderSource {
+  ORDER
+  QUOTE
+}
+
+enum OrderStatus {
+  PENDING      // saved, not yet confirmed by our team
+  CONTACTED    // team contacted the client
+  QUOTE_SENT   // team confirmed the quote
+  CONFIRMED    // client confirmed the quote
+  ADVANCE_PAID // advance payment received (Phase 3)
+  PAID         // full payment received
+  IN_PROGRESS  // design/build work started
+  READY        // site ready, hosting can activate
+  ACTIVE       // live + paid
+  CANCELLED
+  SUSPENDED
+}
+
+model Subscription {
+  id              String        @id @default(cuid())
+  orderId         String        @unique
+  order           Order         @relation(fields: [orderId], references: [id])
+  clientId        String
+  client          Client        @relation(fields: [clientId], references: [id])
+  status          SubStatus    @default(ACTIVE)
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  // Phase 3: renewal reminders, grace, suspension.
+  graceEndsAt     DateTime?
+  suspendedAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([clientId])
+  @@index([currentPeriodEnd])
+}
+
+enum SubStatus {
+  ACTIVE
+  TRIAL
+  PAST_DUE
+  SUSPENDED
+  CANCELLED
+}
+
+// Phase 2: client accounts.
+model Client {
+  id            String      @id @default(cuid())
+  email         String      @unique
+  name          String
+  phone         String?
+  passwordHash  String? // null until the client sets a password
+  mfaEnabled    Boolean     @default(false)
+  mfaSecret     String? // TOTP secret, encrypted at rest (Phase 2)
+  roles         String      @default("CLIENT") // "CLIENT" | "ADMIN" | "TEAM"
+  status        String      @default("ACTIVE") // "ACTIVE" | "PENDING_ACTIVATION" | "DEACTIVATED"
+
+  // Invitation & Password Reset tokens
+  inviteToken       String?   @unique
+  inviteExpiresAt   DateTime?
+  resetToken        String?   @unique
+  resetExpiresAt    DateTime?
+
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  orders         Order[]
+  subscriptions  Subscription[]
+  sessions       Session[]
+  invoices       Invoice[]
+  paymentTransactions PaymentTransaction[]
+
+  @@index([email])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  ip        String?
+  userAgent String?
+
+  @@index([clientId])
+  @@index([token])
+}
+
+model Invoice {
+  id          String        @id @default(cuid())
+  orderId     String?
+  order       Order?        @relation(fields: [orderId], references: [id])
+  clientId    String
+  client      Client        @relation(fields: [clientId], references: [id])
+  amountCents Int
+  currency    String        @default("USD")
+  status      InvoiceStatus @default(UNPAID)
+  description String
+  dueDate     DateTime
+  paidAt      DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([clientId])
+  @@index([status])
+  @@index([orderId])
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PAID
+  CANCELLED
+  REFUNDED
+}
+
+model PaymentTransaction {
+  id                  String   @id @default(cuid())
+  gateway             String
+  gatewayTransactionId String?  @unique
+  amount              Int      // in smallest currency unit (paisa for NPR, cents for USD)
+  currency            String   @default("NPR")
+  status              String   // pending | completed | failed | cancelled
+  orderId             String?
+  order               Order?    @relation(fields: [orderId], references: [id])
+  invoiceId           String?
+  clientId            String
+  client              Client   @relation(fields: [clientId], references: [id])
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([gateway, gatewayTransactionId])
+  @@index([clientId])
+  @@index([status])
+  @@index([orderId])
+  @@index([invoiceId])
+}
+
+// Phase 2: audit log — who did what, when.
+model AuditLog {
+  id        String   @id @default(cuid())
+  clientId  String? // null for system actions
+  actorEmail String
+  action    String
+  entity    String // e.g. "Order", "Package"
+  entityId  String?
+  detail    String? // JSON, no secrets
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([actorEmail])
+}

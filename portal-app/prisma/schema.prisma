@@ -1,0 +1,193 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrderStatus {
+  PENDING
+  QUOTE_SENT
+  ADVANCE_PAID
+  IN_PROGRESS
+  READY
+  ACTIVE
+  CANCELLED
+  SUSPENDED
+}
+
+enum SubStatus {
+  ACTIVE
+  TRIAL
+  PAST_DUE
+  SUSPENDED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PAID
+  CANCELLED
+  REFUNDED
+}
+
+model Package {
+  id           String   @id @default(uuid())
+  name         String
+  category     String
+  description  String
+  priceCents   Int
+  billingCycle String
+  ramMb        Int?     @default(0)
+  cpuCores     Float?   @default(0)
+  storageMb    Int?     @default(0)
+  dnsIncluded  Boolean  @default(false)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  orders       Order[]
+
+  @@unique([name, category])
+  @@index([category, active])
+}
+
+model Order {
+  id            String      @id @default(uuid())
+  clientId      String?
+  clientName    String
+  clientEmail   String
+  clientPhone   String?
+  packageId     String
+  selectionJson String
+  totalCents    Int
+  currency      String      @default("USD")
+  status        OrderStatus @default(PENDING)
+  advancePct    Int         @default(50)
+  advanceCents  Int         @default(0)
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  client        Client?     @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  package       Package     @relation(fields: [packageId], references: [id])
+  subscription  Subscription?
+  invoices      Invoice[]
+
+  @@index([status])
+  @@index([clientEmail])
+  @@index([clientId])
+}
+
+model Subscription {
+  id                 String    @id @default(uuid())
+  orderId            String    @unique
+  clientId           String
+  status             SubStatus @default(ACTIVE)
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  graceEndsAt        DateTime?
+  suspendedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  order              Order     @relation(fields: [orderId], references: [id])
+  client             Client    @relation(fields: [clientId], references: [id])
+
+  @@index([clientId])
+  @@index([currentPeriodEnd])
+}
+
+model Client {
+  id                  String               @id @default(uuid())
+  email               String               @unique
+  name                String
+  phone               String?
+  passwordHash        String?
+  mfaEnabled          Boolean              @default(false)
+  mfaSecret           String?
+  roles               String               @default("CLIENT")
+  status              String               @default("ACTIVE")
+  inviteToken         String?              @unique
+  inviteExpiresAt     DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  orders              Order[]
+  subscriptions       Subscription[]
+  sessions            Session[]
+  invoices            Invoice[]
+  paymentTransactions PaymentTransaction[]
+
+  @@index([email])
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  clientId  String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  ip        String?
+  userAgent String?
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([token])
+}
+
+model Invoice {
+  id          String        @id @default(uuid())
+  orderId     String?
+  clientId    String
+  amountCents Int
+  currency    String        @default("USD")
+  status      InvoiceStatus @default(UNPAID)
+  description String
+  dueDate     DateTime
+  paidAt      DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  order       Order?        @relation(fields: [orderId], references: [id])
+  client      Client        @relation(fields: [clientId], references: [id])
+
+  @@index([clientId])
+  @@index([status])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  clientId   String?
+  actorEmail String
+  action     String
+  entity     String
+  entityId   String?
+  detail     String?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([actorEmail])
+}
+
+model PaymentTransaction {
+  id                   String   @id @default(uuid())
+  gateway              String
+  gatewayTransactionId String?  @unique
+  amount               Int
+  currency             String   @default("NPR")
+  status               String
+  orderId              String?
+  invoiceId            String?
+  clientId             String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  client               Client   @relation(fields: [clientId], references: [id])
+
+  @@unique([gateway, gatewayTransactionId])
+  @@index([clientId])
+  @@index([status])
+  @@index([orderId])
+  @@index([invoiceId])
+}

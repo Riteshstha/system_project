@@ -1,0 +1,23 @@
+name: Push to GitBook
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  push-to-gitbook:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Push to GitBook
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITBOOK_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"repository": "${{ github.repository }}", "branch": "${{ github.ref_name }}", "commit": "${{ github.sha }}"}' \
+            https://api.gitbook.com/v1/repos/${{ github.repository }}/push

@@ -1,0 +1,98 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+model Client {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String
+  phone        String?
+  passwordHash String
+  roles        String    @default("CLIENT")
+  status       String    @default("ACTIVE")
+  createdAt    DateTime  @default(now())
+  mfaEnabled   Boolean   @default(false)
+  sessions     Session[]
+  orders       Order[]
+  invoices     Invoice[]
+  subscriptions Subscription[]
+}
+model Session {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  clientId  String
+createdAt DateTime @default(now())
+  expiresAt DateTime
+  client    Client   @relation(fields: [clientId], references: [id])
+}
+model Order {
+  id           String    @id @default(uuid())
+  clientId     String
+clientName   String?                        // <-- naya
+  clientEmail  String?   
+  packageId    String?
+  totalCents   Int       @default(0)
+  advanceCents Int       @default(0)
+  status       String    @default("PENDING")
+  currency     String    @default("NPR")
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  selectionJson String?
+  client       Client    @relation(fields: [clientId], references: [id])
+  package      Package?  @relation(fields: [packageId], references: [id])
+  invoices     Invoice[]
+  subscriptions Subscription[]
+}
+model Package {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String
+  priceCents  Int
+  currency    String   @default("NPR")
+  type        String
+  status      String   @default("ACTIVE")
+  orders      Order[]
+}
+model Invoice {
+  id          String    @id @default(uuid())
+  orderId     String
+  clientId    String
+  amountCents Int
+  status      String    @default("UNPAID")
+  dueDate     DateTime
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  description String?
+  order       Order     @relation(fields: [orderId], references: [id])
+  client      Client    @relation(fields: [clientId], references: [id])
+}
+model Subscription {
+  id                 String   @id @default(uuid())
+  orderId            String   @unique
+  clientId           String
+  status             String   @default("ACTIVE")
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  graceEndsAt        DateTime?
+  suspendedAt        DateTime?
+ createdAt          DateTime @default(now())  
+order              Order    @relation(fields: [orderId], references: [id])
+  client             Client   @relation(fields: [clientId], references: [id])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String
+  entity    String
+  entityId  String?
+  userId    String?
+  ip        String?
+  userAgent String?
+  data      String?  @default("")
+  createdAt DateTime @default(now())
+}
